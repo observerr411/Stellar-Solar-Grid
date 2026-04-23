@@ -251,7 +251,7 @@ impl SolarGridContract {
         let key = DataKey::Meter(meter_id.clone());
         let mut meter: Meter = env.storage().persistent().get(&key).expect("meter not found");
         meter.units_used += units;
-        meter.balance -= cost;
+        meter.balance = meter.balance.saturating_sub(cost);
         let deactivated = if meter.balance <= 0 {
             meter.balance = 0;
             meter.active = false;
@@ -458,6 +458,31 @@ mod tests {
         assert!(!meter.active);
     }
 
+    /// update_usage with a huge cost should clamp balance to zero without panic.
+    #[test]
+    fn test_update_usage_huge_cost_clamps_to_zero() {
+        let (env, client, _admin) = setup();
+        let (token_address, token_admin_client, _token_client) = setup_token(&env);
+
+        let user = Address::generate(&env);
+        let meter_id = symbol_short!("METER9");
+
+        allowlist_and_register(&client, &meter_id, &user);
+        token_admin_client.mint(&user, &100_i128);
+        client.make_payment(
+            &meter_id,
+            &token_address,
+            &user,
+            &100_i128,
+            &PaymentPlan::UsageBased,
+        );
+
+        client.update_usage(&meter_id, &1_u64, &i128::MAX);
+        let meter = client.get_meter(&meter_id);
+        assert_eq!(meter.balance, 0);
+        assert_eq!(meter.units_used, 1);
+        assert!(!meter.active);
+    }
     /// check_access returns false when balance is zero even if active flag is true.
     #[test]
     fn test_check_access_false_when_balance_zero() {
