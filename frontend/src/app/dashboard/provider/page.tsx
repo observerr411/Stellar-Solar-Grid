@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Navbar from "@/components/Navbar";
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
+const API = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:3001";
 
 /** Stellar public keys: G + 55 base32 chars (56 total) */
 function isValidStellarAddress(addr: string): boolean {
