@@ -12,7 +12,7 @@ const NAV_LINKS = [
 ];
 
 export default function Navbar() {
-  const { address, connect, disconnect } = useWalletStore();
+  const { address, connect, disconnect, connectError, clearConnectError } = useWalletStore();
   const [menuOpen, setMenuOpen] = useState(false);
 
   const short = address ? `${address.slice(0, 4)}…${address.slice(-4)}` : null;
@@ -66,6 +66,32 @@ export default function Navbar() {
           </button>
         </div>
       </div>
+
+      {/* Wallet connect error banner */}
+      {connectError && (
+        <div className="flex items-center justify-between gap-3 border-t border-red-500/30 bg-red-900/20 px-4 py-2.5 text-sm text-red-400">
+          <span>
+            {connectError}{" "}
+            {connectError.includes("not installed") && (
+              <a
+                href="https://freighter.app"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline underline-offset-2 text-red-300 hover:text-white transition"
+              >
+                Install Freighter ↗
+              </a>
+            )}
+          </span>
+          <button
+            onClick={clearConnectError}
+            aria-label="Dismiss error"
+            className="shrink-0 text-red-400 hover:text-white transition"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* Mobile dropdown menu */}
       {menuOpen && (
