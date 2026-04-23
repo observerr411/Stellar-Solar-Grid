@@ -8,6 +8,8 @@ use soroban_sdk::{
 
 const ADMIN: Symbol = symbol_short!("ADMIN");
 const ALLOWLIST: Symbol = symbol_short!("ALLOWLIST");
+const SECONDS_PER_DAY: u64 = 86_400;
+const SECONDS_PER_WEEK: u64 = 604_800;
 
 // ── Data types ────────────────────────────────────────────────────────────────
 
@@ -28,6 +30,7 @@ pub struct Meter {
     pub units_used: u64,     // kWh * 1000 (milli-kWh for precision)
     pub plan: PaymentPlan,
     pub last_payment: u64,   // ledger timestamp
+    pub expires_at: u64,     // ledger timestamp when access expires
 }
 
 #[contracttype]
@@ -77,6 +80,7 @@ impl SolarGridContract {
             units_used: 0,
             plan: PaymentPlan::Daily,
             last_payment: env.ledger().timestamp(),
+            expires_at: env.ledger().timestamp(),
         };
         env.storage().persistent().set(&key, &meter);
 
@@ -245,10 +249,17 @@ impl SolarGridContract {
         }
         let key = DataKey::Meter(meter_id.clone());
         let mut meter: Meter = env.storage().persistent().get(&key).expect("meter not found");
+        let now = env.ledger().timestamp();
+        let expires_at = match plan {
+            PaymentPlan::Daily => now.saturating_add(SECONDS_PER_DAY),
+            PaymentPlan::Weekly => now.saturating_add(SECONDS_PER_WEEK),
+            PaymentPlan::UsageBased => u64::MAX,
+        };
         meter.balance += amount;
         meter.active = true;
         meter.plan = plan.clone();
-        meter.last_payment = env.ledger().timestamp();
+        meter.last_payment = now;
+        meter.expires_at = expires_at;
         env.storage().persistent().set(&key, &meter);
 
         // payment_received
@@ -267,7 +278,7 @@ impl SolarGridContract {
     pub fn check_access(env: Env, meter_id: Symbol) -> bool {
         let key = DataKey::Meter(meter_id);
         let meter: Meter = env.storage().persistent().get(&key).expect("meter not found");
-        meter.active && meter.balance > 0
+        meter.active && meter.balance > 0 && env.ledger().timestamp() < meter.expires_at
     }
 
     /// Called by the IoT oracle to record energy consumption (milli-kWh).
@@ -349,7 +360,7 @@ impl SolarGridContract {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::{symbol_short, testutils::Address as _, Env};
+    use soroban_sdk::{symbol_short, testutils::{Address as _, Ledger}, Env};
 
     fn setup() -> (Env, SolarGridContractClient<'static>, Address) {
         let env = Env::default();
@@ -512,6 +523,27 @@ mod tests {
         let meter = client.get_meter(&meter_id);
         assert_eq!(meter.balance, 0);
         assert!(!meter.active);
+    }
+
+    /// Daily plans should auto-expire after 24 hours even with remaining balance.
+    #[test]
+    fn test_check_access_false_when_plan_expired() {
+        let (env, client, _admin) = setup();
+
+        let user = Address::generate(&env);
+        let meter_id = symbol_short!("METER9");
+
+        allowlist_and_register(&client, &meter_id, &user);
+        client.make_payment(&meter_id, &user, &2_000_000_i128, &PaymentPlan::Daily);
+        assert!(client.check_access(&meter_id));
+
+        let meter = client.get_meter(&meter_id);
+        env.ledger().with_mut(|li| {
+            li.timestamp = meter.expires_at;
+        });
+
+        // Access should be denied exactly at expiry boundary.
+        assert!(!client.check_access(&meter_id));
     }
 
     /// Registering an owner not on the allowlist must panic.
